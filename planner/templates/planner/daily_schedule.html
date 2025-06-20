@@ -1,0 +1,187 @@
+{% load custom_filters %}
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>📅 今日任務排程</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .time-slot {
+      border-bottom: 1px solid #ccc;
+      height: 60px;
+      position: relative;
+    }
+    .task-item {
+      cursor: grab;
+      background-color: #f8f9fa;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 6px;
+    }
+    .dropzone {
+      height: 100%;
+      position: relative;
+    }
+    .scheduled {
+      position: absolute;
+      background-color: #ffc107;
+      padding: 2px 6px;
+      border-radius: 4px;
+      top: 5px;
+      left: 10px;
+    }
+  </style>
+</head>
+{% csrf_token %}
+<body class="bg-light">
+<div class="container py-4">
+  <h2 class="mb-4">📅 {{ today }} 任務排程</h2>
+  <div class="row">
+    <!-- 時間軸 -->
+    <div class="col-md-8">
+      <div class="border rounded bg-white p-2">
+        {% for slot in time_slots %}
+  <div class="time-slot d-flex align-items-center">
+    <div class="col-2 text-end pe-3 text-muted">{{ slot }}</div>
+    <div class="col dropzone border-start" data-time="{{ slot }}">
+      {% with scheduled_map|get_item:slot as items %}
+        {% if items %}
+          {% for scheduled in items %}
+            <div class="scheduled"
+            data-task-id="{{ scheduled.task.id }}"
+     data-time="{{ scheduled.start_time|time:'H:i' }}"
+     style="cursor: pointer;"
+     onclick="deleteScheduledTask(this)">
+              {{ scheduled.task.title }}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </div>
+  </div>
+{% endfor %}
+      </div>
+    </div>
+
+    <!-- 任務清單 -->
+  <div class="col-md-4">
+  <div class="bg-white border rounded p-3 mb-3">
+    <h5 class="mb-3">📌 任務清單</h5>
+    {% for task in tasks %}
+      <div class="task-item" draggable="true" data-task-id="{{ task.id }}">
+        {{ task.title }}
+      </div>
+    {% empty %}
+      <p class="text-muted">無任務</p>
+    {% endfor %}
+  </div>
+
+  <div class="bg-white border rounded p-3">
+    <h6 class="mb-3">➕ 新增任務</h6>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {{ task_form.as_p }}
+      <button type="submit" class="btn btn-primary btn-sm">新增</button>
+    </form>
+  </div>
+</div>
+
+<!-- JS 拖拉行為 -->
+<script>
+  let dragged;
+  const todayDate = "{{ today|date:'Y-m-d' }}";
+
+  document.querySelectorAll('.task-item').forEach(item => {
+    item.addEventListener('dragstart', (e) => {
+      dragged = e.target;
+    });
+  });
+
+  document.querySelectorAll('.dropzone').forEach(zone => {
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+
+      const taskId = dragged.getAttribute('data-task-id');
+      const time = zone.getAttribute('data-time');
+
+      // 顯示排入視覺效果
+      const cloned = dragged.cloneNode(true);
+      cloned.classList.remove('task-item');
+      cloned.classList.add('scheduled');
+      zone.appendChild(cloned);
+
+      // AJAX 傳送資料
+      fetch("{% url 'ajax_schedule_task' %}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+          task_id: taskId,
+          time: time,
+          date: todayDate
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status !== 'success') {
+          alert("儲存失敗：" + data.message);
+        }
+      });
+    });
+  });
+
+  // CSRF 取得方法
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        // Does this cookie string begin with the name we want?
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+  function deleteScheduledTask(element) {
+  if (!confirm("確定要刪除這個排程任務嗎？")) return;
+
+  const taskId = element.getAttribute("data-task-id");
+  const time = element.getAttribute("data-time");
+  const date = "{{ today|date:'Y-m-d' }}";
+
+  fetch("{% url 'ajax_delete_scheduled_task' %}", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": getCookie('csrftoken')
+    },
+    body: JSON.stringify({
+      task_id: taskId,
+      time: time,
+      date: date
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.status === 'deleted') {
+      element.remove();  // 從畫面中移除
+    } else {
+      alert("刪除失敗：" + (data.message || '找不到資料'));
+    }
+  });
+}
+</script>
+
+</body>
+</html>
